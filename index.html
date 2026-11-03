@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 가위바위보 손 모양 인식기</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        pastelBg: '#F3F0FF',
+                        pastelCard: '#FFFFFF',
+                        pastelAccent: '#8B5CF6',
+                        pastelAccentHover: '#7C3AED',
+                        pastelGreen: '#10B981',
+                        pastelRed: '#EF4444',
+                        pastelYellow: '#F59E0B'
+                    },
+                    fontFamily: {
+                        sans: ['Pretendard', 'Noto Sans KR', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .mirror { transform: scaleX(-1); }
+        .soft-shadow { box-shadow: 0 10px 25px -5px rgba(139, 92, 246, 0.15), 0 8px 10px -6px rgba(139, 92, 246, 0.1); }
+    </style>
+</head>
+<body class="bg-pastelBg text-gray-800 min-h-screen flex flex-col items-center justify-between p-4 md:p-8 font-sans">
+
+    <!-- 상단 헤더 -->
+    <header class="text-center my-4 max-w-xl">
+        <h1 class="text-3xl md:text-4xl font-extrabold text-indigo-900 tracking-tight flex items-center justify-center gap-3">
+            <span>✌️</span> AI 가위바위보 인식기 <span>✊</span>
+        </h1>
+        <p class="text-gray-600 mt-2 text-sm md:text-base">
+            Roboflow ViT AI 모델을 활용해 손 모양(가위, 바위, 보)을 실시간으로 감지합니다.
+        </p>
+    </header>
+
+    <!-- 메인 콘텐츠 영역 -->
+    <main class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-3 gap-6 my-auto">
+        
+        <div class="md:col-span-2 bg-pastelCard rounded-3xl p-4 md:p-6 soft-shadow flex flex-col items-center justify-between relative border border-purple-100">
+            <div class="w-full flex justify-between items-center mb-4 px-2">
+                <div class="flex items-center gap-2">
+                    <span id="statusIndicator" class="w-3.5 h-3.5 rounded-full bg-gray-400"></span>
+                    <span id="statusText" class="text-sm font-semibold text-gray-600">카메라 대기 중</span>
+                </div>
+                <div id="aiAnalyzingBadge" class="hidden flex items-center gap-2 bg-purple-100 text-purple-700 text-xs px-3 py-1 rounded-full font-bold animate-pulse">
+                    <i class="fa-solid font-bold fa-spinner fa-spin"></i> AI 분석 중...
+                </div>
+            </div>
+
+            <div class="relative w-full aspect-video bg-gray-900 rounded-2xl overflow-hidden flex items-center justify-center shadow-inner border border-gray-200">
+                <video id="webcamVideo" autoplay playsinline class="w-full h-full object-cover mirror hidden"></video>
+                <img id="imagePreview" class="w-full h-full object-contain hidden" alt="미리보기 이미지" />
+
+                <div id="placeholder" class="flex flex-col items-center text-gray-400 p-6 text-center">
+                    <i class="fa-solid fa-camera-retro text-5xl mb-3 opacity-60"></i>
+                    <p class="text-base font-medium">카메라를 시작하거나 사진을 업로드해 주세요.</p>
+                </div>
+
+                <canvas id="captureCanvas" class="hidden"></canvas>
+            </div>
+
+            <div class="w-full grid grid-cols-2 sm:grid-cols-4 gap-2 mt-6">
+                <button id="btnStartCam" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm md:text-base">
+                    <i class="fa-solid fa-video"></i> 카메라 시작
+                </button>
+                <button id="btnStartDetect" disabled class="bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm md:text-base">
+                    <i class="fa-solid fa-play"></i> 인식 시작
+                </button>
+                <button id="btnStopDetect" disabled class="bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm md:text-base">
+                    <i class="fa-solid fa-pause"></i> 인식 중지
+                </button>
+                <button id="btnStopCam" disabled class="bg-rose-500 hover:bg-rose-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 text-sm md:text-base">
+                    <i class="fa-solid fa-video-slash"></i> 종료
+                </button>
+            </div>
+
+            <div class="w-full mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                <label class="text-xs md:text-sm font-semibold text-gray-500">카메라 사용이 어려우신가요?</label>
+                <label for="fileInput" class="cursor-pointer bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs md:text-sm font-bold py-2 px-4 rounded-lg transition-all border border-gray-300 flex items-center gap-2">
+                    <i class="fa-solid fa-upload"></i> 사진 업로드
+                </label>
+                <input type="file" id="fileInput" accept="image/*" class="hidden" />
+            </div>
+        </div>
+
+        <div class="bg-pastelCard rounded-3xl p-6 soft-shadow flex flex-col items-center justify-between border border-purple-100">
+            <h2 class="text-xl font-bold text-gray-700 self-start border-b border-gray-100 w-full pb-3 flex items-center gap-2">
+                <i class="fa-solid fa-chart-line text-purple-600"></i> 인식 결과
+            </h2>
+
+            <div class="my-auto text-center py-6 w-full">
+                <div id="resultIcon" class="text-7xl md:text-8xl mb-4 transition-transform duration-300 transform hover:scale-110">
+                    ❓
+                </div>
+                <div id="resultLabel" class="text-2xl md:text-3xl font-black text-indigo-950 tracking-wide mb-1">
+                    손을 보여주세요
+                </div>
+                <p id="resultRawClass" class="text-xs text-gray-400 font-mono tracking-wider upperCase mb-4">
+                    NONE
+                </p>
+
+                <div class="w-full bg-gray-100 rounded-full h-5 overflow-hidden p-0.5 border border-gray-200 shadow-inner mt-4">
+                    <div id="confidenceBar" class="bg-gradient-to-r from-purple-500 to-indigo-600 h-full rounded-full transition-all duration-300 w-0"></div>
+                </div>
+                <div class="flex justify-between items-center mt-2 px-1">
+                    <span class="text-xs text-gray-400 font-bold">신뢰도 (Confidence)</span>
+                    <span id="confidenceText" class="text-base font-extrabold text-purple-700">0%</span>
+                </div>
+            </div>
+
+            <div id="alertBox" class="w-full bg-blue-50 border border-blue-200 text-blue-700 p-3 rounded-xl text-xs md:text-sm leading-relaxed flex items-start gap-2">
+                <i class="fa-solid fa-circle-info mt-0.5 text-blue-500"></i>
+                <span id="alertMessage">카메라를 시작하거나 이미지 파일을 업로드하면 분석을 진행할 수 있습니다.</span>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-8 text-center text-xs text-gray-400">
+        <p>Powered by Roboflow ViT Model & Vercel Serverless Functions</p>
+    </footer>
+
+    <script>
+        const webcamVideo = document.getElementById('webcamVideo');
+        const imagePreview = document.getElementById('imagePreview');
+        const placeholder = document.getElementById('placeholder');
+        const captureCanvas = document.getElementById('captureCanvas');
+        const fileInput = document.getElementById('fileInput');
+
+        const btnStartCam = document.getElementById('btnStartCam');
+        const btnStartDetect = document.getElementById('btnStartDetect');
+        const btnStopDetect = document.getElementById('btnStopDetect');
+        const btnStopCam = document.getElementById('btnStopCam');
+
+        const resultIcon = document.getElementById('resultIcon');
+        const resultLabel = document.getElementById('resultLabel');
+        const resultRawClass = document.getElementById('resultRawClass');
+        const confidenceBar = document.getElementById('confidenceBar');
+        const confidenceText = document.getElementById('confidenceText');
+        const alertBox = document.getElementById('alertBox');
+        const alertMessage = document.getElementById('alertMessage');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const aiAnalyzingBadge = document.getElementById('aiAnalyzingBadge');
+
+        let mediaStream = null;
+        let isDetecting = false;
+        let isRequestPending = false;
+        let detectTimer = null;
+        let currentMode = 'none';
+
+        const CLASS_MAP = {
+            'rock': { name: '바위', emoji: '✊', color: 'text-amber-600' },
+            'paper': { name: '보', emoji: '🖐', color: 'text-blue-600' },
+            'scissors': { name: '가위', emoji: '✌️', color: 'text-rose-600' }
+        };
+
+        function showAlert(msg, type = 'info') {
+            alertMessage.innerText = msg;
+            alertBox.className = "w-full p-3 rounded-xl text-xs md:text-sm leading-relaxed flex items-start gap-2 border ";
+            if (type === 'error') {
+                alertBox.classList.add('bg-rose-50', 'border-rose-200', 'text-rose-700');
+            } else if (type === 'success') {
+                alertBox.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-700');
+            } else if (type === 'warning') {
+                alertBox.classList.add('bg-amber-50', 'border-amber-200', 'text-amber-700');
+            } else {
+                alertBox.classList.add('bg-blue-50', 'border-blue-200', 'text-blue-700');
+            }
+        }
+
+        function setStatus(status) {
+            if (status === 'active') {
+                statusIndicator.className = "w-3.5 h-3.5 rounded-full bg-emerald-500 animate-pulse";
+                statusText.innerText = "실시간 인식 중";
+            } else if (status === 'ready') {
+                statusIndicator.className = "w-3.5 h-3.5 rounded-full bg-blue-500";
+                statusText.innerText = "카메라 준비됨";
+            } else {
+                statusIndicator.className = "w-3.5 h-3.5 rounded-full bg-gray-400";
+                statusText.innerText = "카메라 대기 중";
+            }
+        }
+
+        async function startCamera() {
+            try {
+                stopCamera();
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+                    audio: false
+                });
+
+                webcamVideo.srcObject = mediaStream;
+                webcamVideo.classList.remove('hidden');
+                imagePreview.classList.add('hidden');
+                placeholder.classList.add('hidden');
+
+                btnStartCam.disabled = true;
+                btnStopCam.disabled = false;
+                btnStartDetect.disabled = false;
+                currentMode = 'webcam';
+
+                setStatus('ready');
+                showAlert("카메라가 설정되었습니다. '인식 시작' 버튼을 누르세요.", "success");
+            } catch (err) {
+                showAlert("카메라 접근 권한이 필요합니다. 접근을 허용하거나 사진 업로드를 이용해 주세요.", "error");
+            }
+        }
+
+        function stopCamera() {
+            stopDetection();
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            webcamVideo.srcObject = null;
+            webcamVideo.classList.add('hidden');
+            placeholder.classList.remove('hidden');
+
+            btnStartCam.disabled = false;
+            btnStopCam.disabled = true;
+            btnStartDetect.disabled = true;
+            btnStopDetect.disabled = true;
+            currentMode = 'none';
+
+            setStatus('stopped');
+        }
+
+        function startDetection() {
+            if (isDetecting) return;
+            isDetecting = true;
+
+            btnStartDetect.disabled = true;
+            btnStopDetect.disabled = false;
+
+            setStatus('active');
+            showAlert("AI 손 모양 인식을 진행 중입니다...", "info");
+
+            captureAndPredict();
+            detectTimer = setInterval(captureAndPredict, 1000);
+        }
+
+        function stopDetection() {
+            isDetecting = false;
+            if (detectTimer) {
+                clearInterval(detectTimer);
+                detectTimer = null;
+            }
+            btnStartDetect.disabled = (currentMode !== 'webcam');
+            btnStopDetect.disabled = true;
+
+            if (currentMode === 'webcam') setStatus('ready');
+            aiAnalyzingBadge.classList.add('hidden');
+        }
+
+        async function captureAndPredict() {
+            if (isRequestPending) return;
+
+            let base64Image = "";
+
+            if (currentMode === 'webcam') {
+                if (!webcamVideo.videoWidth) return;
+                captureCanvas.width = webcamVideo.videoWidth;
+                captureCanvas.height = webcamVideo.videoHeight;
+                const ctx = captureCanvas.getContext('2d');
+                ctx.translate(captureCanvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(webcamVideo, 0, 0, captureCanvas.width, captureCanvas.height);
+                base64Image = captureCanvas.toDataURL('image/jpeg', 0.8);
+            } else if (currentMode === 'file') {
+                base64Image = imagePreview.src;
+            } else {
+                return;
+            }
+
+            isRequestPending = true;
+            aiAnalyzingBadge.classList.remove('hidden');
+
+            try {
+                const response = await fetch('/api/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: base64Image })
+                });
+
+                // HTML 등 non-JSON 응답 감지 시 예외 처리
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const textErr = await response.text();
+                    console.error("Non-JSON Server Output:", textErr);
+                    throw new Error(`API 경로(/api/predict)를 찾을 수 없습니다 (404/500). GitHub 저장소 내 api/predict.js 경로가 맞는지 확인해 주세요.`);
+                }
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "인식 서버 응답 오류");
+                }
+
+                updateResults(data);
+
+            } catch (err) {
+                console.error("Predict Error:", err);
+                showAlert(`인식 에러: ${err.message}`, "error");
+                if (currentMode === 'webcam' && isDetecting) {
+                    stopDetection();
+                }
+            } finally {
+                isRequestPending = false;
+                aiAnalyzingBadge.classList.add('hidden');
+            }
+        }
+
+        function updateResults(data) {
+            const rawClass = (data.class || 'unknown').toLowerCase();
+            const confidence = data.confidence ? Math.round(data.confidence * 100) : 0;
+
+            const mapped = CLASS_MAP[rawClass] || { name: rawClass.toUpperCase(), emoji: '❓' };
+
+            resultIcon.innerText = mapped.emoji;
+            resultLabel.innerText = mapped.name;
+            resultRawClass.innerText = rawClass.toUpperCase();
+
+            confidenceBar.style.width = `${confidence}%`;
+            confidenceText.innerText = `${confidence}%`;
+
+            if (confidence >= 70) {
+                showAlert(`정확도 ${confidence}%로 [${mapped.name}] 손 모양이 감지되었습니다!`, "success");
+            } else {
+                showAlert(`손 모양이 명확하지 않습니다. 카메라 중앙에 더 가깝게 보여주세요.`, "warning");
+            }
+        }
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            stopCamera();
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                imagePreview.src = evt.target.result;
+                imagePreview.classList.remove('hidden');
+                webcamVideo.classList.add('hidden');
+                placeholder.classList.add('hidden');
+
+                currentMode = 'file';
+                setStatus('ready');
+                showAlert("사진이 등록되었습니다. AI 분석을 시작합니다.", "info");
+
+                captureAndPredict();
+            };
+            reader.readAsDataURL(file);
+        });
+
+        btnStartCam.addEventListener('click', startCamera);
+        btnStopCam.addEventListener('click', stopCamera);
+        btnStartDetect.addEventListener('click', startDetection);
+        btnStopDetect.addEventListener('click', stopDetection);
+    </script>
+</body>
+</html>
