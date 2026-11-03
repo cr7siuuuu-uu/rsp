@@ -3,8 +3,15 @@
  */
 
 export default async function handler(req, res) {
-  // 항상 JSON 헤더 명시
+  // CORS 및 JSON 헤더 설정
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Content-Type', 'application/json');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed. POST 요청만 지원합니다.' });
@@ -14,49 +21,71 @@ export default async function handler(req, res) {
     const { image } = req.body || {};
 
     if (!image) {
-      return res.status(400).json({ error: '요청 바디에 image (Base64) 데이터가 누락되었습니다.' });
+      return res.status(400).json({ error: '요청 데이터에 image (Base64)가 누락되었습니다.' });
     }
 
-    // 환경변수 추출 및 양옆 공백/줄바꿈 완전히 제거
+    // 환경변수 양옆 공백 및 줄바꿈 제거 (Key 복사 오타 방지)
     const apiKey = (process.env.ROBOFLOW_API_KEY || '').trim();
     let endpoint = (process.env.ROBOFLOW_ENDPOINT || '').trim();
 
-    if (!apiKey || !endpoint) {
+    if (!apiKey) {
       return res.status(500).json({ 
-        error: 'Vercel 환경변수(ROBOFLOW_API_KEY 또는 ROBOFLOW_ENDPOINT)가 등록되지 않았습니다. Vercel Settings -> Environment Variables를 확인해 주세요.' 
+        error: 'ROBOFLOW_API_KEY 환경변수가 설정되지 않았습니다. Vercel Settings -> Environment Variables를 확인해 주세요.' 
       });
     }
 
-    // Base64 데이터 정제
+    if (!endpoint) {
+      return res.status(500).json({ 
+        error: 'ROBOFLOW_ENDPOINT 환경변수가 설정되지 않았습니다. Vercel Settings -> Environment Variables를 확인해 주세요.' 
+      });
+    }
+
+    // Base64 Prefix 제거 (pure base64)
     const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, '');
 
-    // URL 및 API Key 파라미터 정제
-    const urlObj = new URL(endpoint);
-    urlObj.searchParams.set('api_key', apiKey);
+    // URL 객체 생성 및 api_key 세팅
+    let targetUrl;
+    try {
+      targetUrl = new URL(endpoint);
+    } catch (e) {
+      return res.status(500).json({ error: `잘못된 ROBOFLOW_ENDPOINT URL 형식입니다: ${endpoint}` });
+    }
+    targetUrl.searchParams.set('api_key', apiKey);
 
-    // Roboflow Workflow / direct inference 지원 payload
-    const payload = {
-      inputs: {
+    // Roboflow Workflow / Classification 호환 요청 생성
+    const isWorkflow = endpoint.includes('/workflows/');
+    let bodyData;
+    let contentType = 'application/json';
+
+    if (isWorkflow) {
+      // Roboflow Workflow 규격: {"inputs": {"image": {"type": "base64", "value": "..."}}}
+      bodyData = JSON.stringify({
+        inputs: {
+          image: {
+            type: "base64",
+            value: cleanBase64
+          }
+        }
+      });
+    } else {
+      // Standard Hosted Classification / Detection API 규격
+      bodyData = JSON.stringify({
         image: {
           type: "base64",
           value: cleanBase64
         }
-      },
-      image: {
-        type: "base64",
-        value: cleanBase64
-      }
-    };
+      });
+    }
 
-    let roboflowResponse = await fetch(urlObj.toString(), {
+    let roboflowResponse = await fetch(targetUrl.toString(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': contentType },
+      body: bodyData
     });
 
-    // 400/422/404 발생시 단일 Base64 전송 규격으로 폴백
-    if (!roboflowResponse.ok && (roboflowResponse.status === 400 || roboflowResponse.status === 422 || roboflowResponse.status === 404)) {
-      roboflowResponse = await fetch(urlObj.toString(), {
+    // 만약 Workflow가 아닌 일반 모델인데 422가 뜬 경우 direct string fallback
+    if (!roboflowResponse.ok && roboflowResponse.status === 422 && !isWorkflow) {
+      roboflowResponse = await fetch(targetUrl.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: cleanBase64
@@ -65,9 +94,9 @@ export default async function handler(req, res) {
 
     if (!roboflowResponse.ok) {
       const errText = await roboflowResponse.text();
-      console.error('Roboflow API Error:', errText);
+      console.error(`Roboflow API Error (${roboflowResponse.status}):`, errText);
       return res.status(roboflowResponse.status).json({ 
-        error: `Roboflow API 호출 실패 (${roboflowResponse.status}): Roboflow URL 및 API Key를 다시 확인해 주세요.` 
+        error: `Roboflow API 호출 실패 (${roboflowResponse.status}): Roboflow URL 주소나 API Key를 확인해 주세요. (${errText.substring(0, 100)})` 
       });
     }
 
@@ -76,7 +105,7 @@ export default async function handler(req, res) {
     let predictedClass = 'unknown';
     let confidence = 0;
 
-    // Workflow 및 일반 Model response 구조 유연 파싱
+    // Roboflow 다양한 응답 구조 통합 추출
     if (rawData.outputs && Array.isArray(rawData.outputs) && rawData.outputs.length > 0) {
       const output = rawData.outputs[0];
       const targetObj = output.predictions || output;

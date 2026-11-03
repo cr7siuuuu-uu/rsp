@@ -299,7 +299,7 @@
                 if (!contentType || !contentType.includes('application/json')) {
                     const textErr = await response.text();
                     console.error("Non-JSON Server Output:", textErr);
-                    throw new Error(`API 경로(/api/predict)를 찾을 수 없습니다 (404/500). GitHub 저장소 내 api/predict.js 경로가 맞는지 확인해 주세요.`);
+                    throw new Error(`API 경로(/api/predict)를 찾을 수 없습니다 (${response.status}). Vercel 대시보드에서 Redeploy를 실행하거나 GitHub 저장소 루트에 api/predict.js가 있는지 확인해 주세요.`);
                 }
 
                 const data = await response.json();
