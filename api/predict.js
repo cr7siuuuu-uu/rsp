@@ -18,30 +18,31 @@ export default async function handler(req, res) {
     let endpointUrl = process.env.ROBOFLOW_ENDPOINT;
 
     if (!apiKey || !endpointUrl) {
-    // URL 앞뒤 공백 제거 및 API Key 준비
+      return res.status(500).json({ error: '서버 환경변수(ROBOFLOW_API_KEY 또는 ROBOFLOW_ENDPOINT)가 설정되지 않았습니다.' });
+    }
+
+    // URL 앞뒤 공백 제거 및 API Key 정리
     endpointUrl = endpointUrl.trim();
     const cleanApiKey = apiKey.trim();
 
-    // Base64 Data URL에서 데이터 부분만 추출 (data:image/jpeg;base64,... -> raw base64)
+    // Base64 Data URL에서 데이터 부분만 추출
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-    // Roboflow Workflow인지 일반 Classification/Detection API인지 구별
+    // Roboflow Workflow 여부 판단
     const isWorkflow = endpointUrl.includes('workflows') || endpointUrl.includes('workflow');
 
     let response;
     
-    // URL 생성 (쿼리스트링에도 api_key 포함)
+    // Roboflow 표준: URL 쿼리 파라미터로 api_key 전달
     const urlObj = new URL(endpointUrl);
     urlObj.searchParams.set('api_key', cleanApiKey);
 
     if (isWorkflow) {
-      // Roboflow Cloud Workflow API 호출 규격 (인증 헤더 추가)
+      // Roboflow Cloud Workflow API 호출
       response = await fetch(urlObj.toString(), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${cleanApiKey}`,
-          'X-Api-Key': cleanApiKey
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           inputs: {
@@ -53,24 +54,30 @@ export default async function handler(req, res) {
         })
       });
     } else {
-      // Roboflow Standard Deployments / Inference API
+      // Roboflow Standard Deployments / Inference API 호출 (Base64 raw string 전송)
       response = await fetch(urlObj.toString(), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Bearer ${cleanApiKey}`,
-          'X-Api-Key': cleanApiKey
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
         body: base64Data
       });
     }
 
-    // 오류 발생 시 Roboflow의 실제 응답 본문을 포함하여 응답
+    // JSON 응답이 아닌 경우를 대비한 안전한 응답 확인
+    const contentType = response.headers.get('content-type');
+    let errorText = '';
+
     if (!response.ok) {
-      const errorText = await response.text();
+      if (contentType && contentType.includes('application/json')) {
+        const errJson = await response.json();
+        errorText = JSON.stringify(errJson);
+      } else {
+        errorText = await response.text();
+      }
       console.error('Roboflow API error response:', errorText);
       return res.status(response.status).json({ 
-        error: `Roboflow API 오류 (${response.status}): ${errorText || response.statusText}` 
+        error: `Roboflow API 오류 (${response.status}): ${errorText.substring(0, 300)}` 
       });
     }
 
