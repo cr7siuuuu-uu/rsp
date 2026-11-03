@@ -18,32 +18,30 @@ export default async function handler(req, res) {
     let endpointUrl = process.env.ROBOFLOW_ENDPOINT;
 
     if (!apiKey || !endpointUrl) {
-      return res.status(500).json({ 
-        error: '서버 환경변수(ROBOFLOW_API_KEY 또는 ROBOFLOW_ENDPOINT)가 설정되지 않았습니다.' 
-      });
-    }
-
-    // URL 앞뒤 공백 제거
+    // URL 앞뒤 공백 제거 및 API Key 준비
     endpointUrl = endpointUrl.trim();
+    const cleanApiKey = apiKey.trim();
 
     // Base64 Data URL에서 데이터 부분만 추출 (data:image/jpeg;base64,... -> raw base64)
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-    // URL에 API Key 연결
-    const urlObj = new URL(endpointUrl);
-    urlObj.searchParams.set('api_key', apiKey.trim());
-
-    // Roboflow Workflow인지 일반 Classification/Detection API인지 구별하여 전송
+    // Roboflow Workflow인지 일반 Classification/Detection API인지 구별
     const isWorkflow = endpointUrl.includes('workflows') || endpointUrl.includes('workflow');
 
     let response;
     
+    // URL 생성 (쿼리스트링에도 api_key 포함)
+    const urlObj = new URL(endpointUrl);
+    urlObj.searchParams.set('api_key', cleanApiKey);
+
     if (isWorkflow) {
-      // Roboflow Workflow API 호출 규격
+      // Roboflow Cloud Workflow API 호출 규격 (인증 헤더 추가)
       response = await fetch(urlObj.toString(), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cleanApiKey}`,
+          'X-Api-Key': cleanApiKey
         },
         body: JSON.stringify({
           inputs: {
@@ -55,11 +53,13 @@ export default async function handler(req, res) {
         })
       });
     } else {
-      // Roboflow Standard Deployments / Inference API (plain base64)
+      // Roboflow Standard Deployments / Inference API
       response = await fetch(urlObj.toString(), {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Bearer ${cleanApiKey}`,
+          'X-Api-Key': cleanApiKey
         },
         body: base64Data
       });
