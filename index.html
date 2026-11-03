@@ -107,7 +107,7 @@
                 <div id="resultLabel" class="text-2xl md:text-3xl font-black text-indigo-950 tracking-wide mb-1">
                     손을 보여주세요
                 </div>
-                <p id="resultRawClass" class="text-xs text-gray-400 font-mono tracking-wider upperCase mb-4">
+                <p id="resultRawClass" class="text-xs text-gray-400 font-mono tracking-wider uppercase mb-4">
                     NONE
                 </p>
 
@@ -161,9 +161,9 @@
         let currentMode = 'none';
 
         const CLASS_MAP = {
-            'rock': { name: '바위', emoji: '✊', color: 'text-amber-600' },
-            'paper': { name: '보', emoji: '🖐', color: 'text-blue-600' },
-            'scissors': { name: '가위', emoji: '✌️', color: 'text-rose-600' }
+            'rock': { name: '바위', emoji: '✊' },
+            'paper': { name: '보', emoji: '🖐' },
+            'scissors': { name: '가위', emoji: '✌️' }
         };
 
         function showAlert(msg, type = 'info') {
@@ -294,12 +294,11 @@
                     body: JSON.stringify({ image: base64Image })
                 });
 
-                // HTML 등 non-JSON 응답 감지 시 예외 처리
                 const contentType = response.headers.get('content-type');
                 if (!contentType || !contentType.includes('application/json')) {
                     const textErr = await response.text();
-                    console.error("Non-JSON Server Output:", textErr);
-                    throw new Error(`API 경로(/api/predict)를 찾을 수 없습니다 (${response.status}). Vercel 대시보드에서 Redeploy를 실행하거나 GitHub 저장소 루트에 api/predict.js가 있는지 확인해 주세요.`);
+                    console.error("Non-JSON Server Response:", textErr);
+                    throw new Error(`API 백엔드 경로(/api/predict) 접근 불가 (${response.status}). 저장소 루트/api/predict.js 위치 및 Vercel Redeploy를 확인하세요.`);
                 }
 
                 const data = await response.json();
@@ -335,10 +334,10 @@
             confidenceBar.style.width = `${confidence}%`;
             confidenceText.innerText = `${confidence}%`;
 
-            if (confidence >= 70) {
+            if (confidence >= 60) {
                 showAlert(`정확도 ${confidence}%로 [${mapped.name}] 손 모양이 감지되었습니다!`, "success");
             } else {
-                showAlert(`손 모양이 명확하지 않습니다. 카메라 중앙에 더 가깝게 보여주세요.`, "warning");
+                showAlert(`손 모양이 명확하지 않습니다. 화면 중앙에 손을 맞춰주세요.`, "warning");
             }
         }
 
