@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     }
 
     const apiKey = process.env.ROBOFLOW_API_KEY;
-    const endpointUrl = process.env.ROBOFLOW_ENDPOINT;
+    let endpointUrl = process.env.ROBOFLOW_ENDPOINT;
 
     if (!apiKey || !endpointUrl) {
       return res.status(500).json({ 
@@ -23,40 +23,68 @@ export default async function handler(req, res) {
       });
     }
 
-    // Base64 Prefix 제거 (data:image/jpeg;base64,... 형식일 경우)
+    // URL 앞뒤 공백 제거
+    endpointUrl = endpointUrl.trim();
+
+    // Base64 Data URL에서 데이터 부분만 추출 (data:image/jpeg;base64,... -> raw base64)
     const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-    // Roboflow API 호출 (URL Query Parameter에 API Key 연결)
-    const requestUrl = endpointUrl.includes('?') 
-      ? `${endpointUrl}&api_key=${apiKey}` 
-      : `${endpointUrl}?api_key=${apiKey}`;
+    // URL에 API Key 연결
+    const urlObj = new URL(endpointUrl);
+    urlObj.searchParams.set('api_key', apiKey.trim());
 
-    const response = await fetch(requestUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: base64Data
-    });
+    // Roboflow Workflow인지 일반 Classification/Detection API인지 구별하여 전송
+    const isWorkflow = endpointUrl.includes('workflows') || endpointUrl.includes('workflow');
 
+    let response;
+    
+    if (isWorkflow) {
+      // Roboflow Workflow API 호출 규격
+      response = await fetch(urlObj.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          inputs: {
+            image: {
+              type: 'base64',
+              value: base64Data
+            }
+          }
+        })
+      });
+    } else {
+      // Roboflow Standard Deployments / Inference API (plain base64)
+      response = await fetch(urlObj.toString(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: base64Data
+      });
+    }
+
+    // 오류 발생 시 Roboflow의 실제 응답 본문을 포함하여 응답
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Roboflow API error:', errorText);
+      console.error('Roboflow API error response:', errorText);
       return res.status(response.status).json({ 
-        error: `Roboflow API 오류: ${response.statusText}` 
+        error: `Roboflow API 오류 (${response.status}): ${errorText || response.statusText}` 
       });
     }
 
     const result = await response.json();
 
-    // Workflow / Classification 모델 파싱 (응답 구조에 맞춰 유연하게 처리)
+    // 응답 데이터에서 클래스 및 신뢰도(Confidence) 파싱
     let predictedClass = null;
     let confidence = 0;
 
-    // 1. Workflow 형식 응답 처리
+    // 1. Workflow 형식 응답 파싱
     if (result.outputs && Array.isArray(result.outputs) && result.outputs.length > 0) {
       const outputObj = result.outputs[0];
-      const predictions = outputObj.predictions || outputObj.response?.predictions;
+      // Workflow의 노드 output 이름에 따른 유연한 접근
+      const predictions = outputObj.predictions || outputObj.predictions?.predictions || outputObj.response?.predictions || outputObj;
       
       if (predictions) {
         if (predictions.top) {
@@ -65,20 +93,30 @@ export default async function handler(req, res) {
         } else if (Array.isArray(predictions) && predictions.length > 0) {
           predictedClass = predictions[0].class || predictions[0].label;
           confidence = predictions[0].confidence || 0;
+        } else if (typeof predictions === 'object') {
+          // 분류 결과 dictionary 형태 (예: { rock: 0.9, paper: 0.1 })
+          let maxConf = 0;
+          for (const [cls, conf] of Object.entries(predictions)) {
+            if (typeof conf === 'number' && conf > maxConf) {
+              maxConf = conf;
+              predictedClass = cls;
+              confidence = conf;
+            }
+          }
         }
       }
     } 
-    // 2. 단일 Classification 모델 표준 응답 처리
+    // 2. Standard Inference API 응답 파싱
     else if (result.predictions) {
-      if (typeof result.predictions === 'object' && result.top) {
-        predictedClass = result.top;
-        confidence = result.confidence || 0;
+      if (typeof result.predictions === 'object' && !Array.isArray(result.predictions)) {
+        predictedClass = result.top || Object.keys(result.predictions)[0];
+        confidence = result.confidence || result.predictions[predictedClass] || 0;
       } else if (Array.isArray(result.predictions) && result.predictions.length > 0) {
         predictedClass = result.predictions[0].class || result.predictions[0].label;
         confidence = result.predictions[0].confidence || 0;
       }
     } 
-    // 3. 바로 top/confidence가 있는 경우
+    // 3. 단일 top / confidence 객체
     else if (result.top) {
       predictedClass = result.top;
       confidence = result.confidence || 0;
@@ -87,7 +125,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       class: predictedClass,
       confidence: confidence,
-      raw: result // 디버깅용
+      raw: result
     });
 
   } catch (err) {
